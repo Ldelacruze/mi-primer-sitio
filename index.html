@@ -666,7 +666,6 @@
     }
 
     function parseRawText(raw) {
-      // Si por error Google devuelve HTML en lugar de CSV, lo ignoramos para no romper la tabla
       if (raw.trim().startsWith('<!DOCTYPE') || raw.trim().startsWith('<html')) {
         return [];
       }
@@ -688,30 +687,27 @@
       const cacheBuster = (url.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
       const targetUrl = url + cacheBuster;
 
-      try {
-        // Intento 1: Conexión directa a Google Sheets
-        const res = await fetch(targetUrl);
-        if (!res.ok) throw new Error("Bloqueo directo");
-        const csvText = await res.text();
-        const parsed = parseRawText(csvText);
-        if (parsed.length > 0) {
-          localStorage.setItem('icodem_saved_table', JSON.stringify(parsed));
-          renderTable(parsed);
-          return;
-        }
-      } catch (err) {
-        // Intento 2: Puente antibloqueo CORS (para cuando abres el archivo desde C:/Users/...)
+      // Lista de proxies de respaldo para saltar la restricción CORS en la web
+      const endpoints = [
+        targetUrl,
+        'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(targetUrl),
+        'https://corsproxy.io/?' + encodeURIComponent(targetUrl),
+        'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl)
+      ];
+
+      for (const endpoint of endpoints) {
         try {
-          const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl);
-          const resProxy = await fetch(proxyUrl);
-          const csvTextProxy = await resProxy.text();
-          const parsedProxy = parseRawText(csvTextProxy);
-          if (parsedProxy.length > 0) {
-            localStorage.setItem('icodem_saved_table', JSON.stringify(parsedProxy));
-            renderTable(parsedProxy);
+          const res = await fetch(endpoint);
+          if (!res.ok) continue;
+          const csvText = await res.text();
+          const parsed = parseRawText(csvText);
+          if (parsed && parsed.length > 0) {
+            localStorage.setItem('icodem_saved_table', JSON.stringify(parsed));
+            renderTable(parsed);
+            return;
           }
-        } catch (proxyErr) {
-          console.error("No se pudo conectar con Google Sheets:", proxyErr);
+        } catch (err) {
+          console.warn("Intento fallido en:", endpoint);
         }
       }
     }
@@ -784,7 +780,6 @@
       updateDateBanner();
       setInterval(updateDateBanner, 3600000);
 
-      // Si había quedado guardado el enlace viejo con "/pubhtml", lo corrige automáticamente
       const storedUrl = normalizeSheetUrl(localStorage.getItem('icodem_sheet_url'));
       const activeSheetUrl = storedUrl || GOOGLE_SHEET_CSV_URL;
       localStorage.setItem('icodem_sheet_url', activeSheetUrl);
